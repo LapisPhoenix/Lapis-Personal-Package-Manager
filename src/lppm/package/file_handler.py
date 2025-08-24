@@ -51,11 +51,14 @@ class FileHandler:
             if file.status == "removed":
                 if file_path.is_dir():
                     file_path.rmdir()
-                file_path.unlink()
+                else:
+                    file_path.unlink()
                 continue
-            
-            with open(file_path, "w") as f:
-                f.write(b64decode(repo.get_contents(file.filename).content).decode())
+
+            # TODO: handle when a directory is updated
+            # TODO: handle when a file is renamed
+            with open(file_path, "wb") as f:
+                f.write(b64decode(repo.get_contents(file.filename).content))
 
     def update(self) -> list[Package]:
         """
