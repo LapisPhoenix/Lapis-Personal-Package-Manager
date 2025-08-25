@@ -5,7 +5,7 @@ from pathlib import Path
 @dataclass()
 class Package:
     """
-    Represents a package.
+    Represents a installed package.
     """
     name: str
     commit: str
