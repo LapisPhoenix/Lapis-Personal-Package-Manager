@@ -89,7 +89,7 @@ class PackageManager:
 
             run(command, cwd=root, check=True)
 
-            venv.pip(["install", "-r", program_root + "/requirements.txt"])
+            venv.pip(["install", "-r", root + "/requirements.txt"])
 
 
     def install_program(self, program_name: str) -> None:
