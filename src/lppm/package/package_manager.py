@@ -1,172 +1,149 @@
 from pathlib import Path
 from os.path import expanduser
+from shutil import rmtree
+from sqlite3 import connect
 from subprocess import run, DEVNULL
-from json import load, dump, JSONDecodeError
-from base64 import b64decode
-from dataclasses import asdict
-from github import Github, Repository, GithubException
-from github.Comparison import Comparison
-from .package import Package
+from github import Github
+# from environment.virtual import VirtualEnvironment
+from src.lppm.environment.virtual import VirtualEnvironment
 
 
-# TODO: Allow user to install to different locations.
 class PackageManager:
     def __init__(self, github: Github):
         self.github = github
-
         user_path = Path(expanduser("~"))
         self.installation_folder = user_path / ".lapis_packages"
-        self.installed_file = self.installation_folder / "install.json"
+        self.installed_database = self.installation_folder / "applications.db"
+        self.virtual_environments = self.installation_folder / "environments"
+        self._verify_file_integrity(folders=[self.installation_folder, self.virtual_environments])
 
-        if not self.installation_folder.exists():
-            self.installation_folder.mkdir()
+        self.connection = connect(self.installed_database)
+        self.cursor = self.connection.cursor()
+        self._database_setup()
 
-    def add_new_package(self, package: Package) -> None:
-        installed_packages = []
-        package.path = str(package.path)
-        if package in self.installed_packages():
+    def run_program(self, name: str, *args) -> None:
+        self.cursor.execute("SELECT root, environment FROM programs WHERE name=?", (name,))
+        program = self.cursor.fetchone()
+
+        if not program:
+            print(f"{name} not found!")
             return
         
-        if self.installed_file.exists():
-            try:
-                with open(self.installed_file, "r") as installed_file:
-                    installed_packages = load(installed_file)
-            except JSONDecodeError as e:
-                print(f"Warning: Invalid JSON in {self.installed_file}, initializing as empty: {e}")
-                installed_packages = []
-            except Exception as e:
-                raise RuntimeError(f"Failed to read {self.installed_file}: {e}")
-        else:
-            try:
-                with open(self.installed_file, "w") as file:
-                    dump([], file, indent=2)
-            except Exception as e:
-                raise RuntimeError(f"Failed to create {self.installed_file}: {e}")
+        program_path = Path(program[0])
+        env_path = Path(program[1])
+        main_file = program_path / "main.py"
+        
+        venv = VirtualEnvironment(env_path)
+        command = [str(main_file)]
+        command.extend(map(str, args))
 
-        installed_packages.append(asdict(package))
+        venv.python(command, False, str(program_path))
 
-        try:
-            with open(self.installed_file, "w") as installed_file:
-                dump(installed_packages, installed_file, indent=2)
-        except Exception as e:
-            raise RuntimeError(f"Failed to write to {self.installed_file}: {e}")
+    def update(self, program: str | None = None) -> None:
+        if program:
+            self.cursor.execute("SELECT commit_hash, root, environment FROM programs WHERE name=?", (program,))
+            program_info = self.cursor.fetchone()
 
-    def installed_packages(self) -> list[Package]:
-        packages = []
+            if not program_info:
+                print(f"{program} not found!")
+                return
+            repo = self.github.get_repo(program)
+            latest_commit_hash = repo.get_commits()[0].sha
+            local_commit_hash = program_info[0]
 
-        if not self.installed_file.exists():
-            try:
-                with open(self.installed_file, "w") as file:
-                    dump([], file, indent=2)
-            except Exception as e:
-                raise RuntimeError(f"Failed to create {self.installed_file}: {e}")
-            return packages
-
-        try:
-            with open(self.installed_file, "r") as file:
-                data = load(file)
-                for pkg in data:
-                    try:
-                        packages.append(Package(pkg["name"], pkg["commit"], pkg["url"], Path(pkg["path"])))
-                    except KeyError as e:
-                        print(f"Skipping invalid package entry, missing key: {e}")
-        except Exception as e:
-            raise RuntimeError(f"Failed to read {self.installed_file}: {e}")
-
-        return packages
-
-    def update(self) -> tuple[list[Package], list[Package]]:
-        """
-        Updates all locally installed packages.
-        :param package:
-        were updated.
-        :return: Returns two lists, the first list being the updated packages, and the second list being the failed packages.
-        """
-        packages = self.installed_packages()
-        updated_packages = []
-        failed_packages = []
-
-        for package in packages:
-            commit = package.commit
-            repo = self.github.get_repo(package.name)
-            latest_commit = repo.get_commits()[0]
-            if commit == latest_commit.sha:
-                continue
+            if latest_commit_hash == local_commit_hash:
+                print(f"{program} already up to date!")
+                return
             
-            comparison = repo.compare(commit, latest_commit.sha)
-            failed = self._update_local_files(package, repo, comparison)
-            if failed == 0:
-                updated_packages.append(package)
-            else:
-                failed_packages.append(package)
+            program_root = program_info[1]
+            environment = program_info[2]
+            venv = VirtualEnvironment(environment)
 
-        return updated_packages, failed_packages
+            command = [
+                "git", "pull", "origin", "main"
+            ]
 
-    def install_package(self, package_name: str) -> Package:
-        repo = self.github.get_repo(package_name)
-        local_package_name = repo.name.replace("/", "_").lower()
-        package_path = self.installation_folder / local_package_name
-        package_path.mkdir(exist_ok=True)
-        command = [
-            "git", "clone", repo.svn_url + ".git", str(package_path)
-        ]
-        run(command, stdout=DEVNULL, stderr=DEVNULL)
-        package = Package(local_package_name, repo.get_commits()[0].sha, repo.svn_url, package_path)
-        self.add_new_package(package)
-        return package
+            run(command, cwd=program_root, check=True)
 
-    def remove_package(self, package_name: str):
-        if package_name not in [pkg.name for pkg in self.installed_packages()]:
+            venv.pip(["install", "-r", program_root + "/requirements.txt"])
+
+    def install_program(self, program_name: str) -> None:
+        # Verify it isnt already installed
+        self.cursor.execute("SELECT * FROM programs WHERE name=?", (program_name,))
+        found = self.cursor.fetchone()
+
+        if found:
+            print(f"[Install]  Already found {program_name} installed!")
             return
 
-        package_name = package_name.replace("/", "-")
-        installed_packages = self.installed_packages()
-        new_packages = [pkg for pkg in installed_packages if pkg.name != package_name]
-        print(new_packages)
+        # Create needed paths
+        program_root_path = self.installation_folder / program_name.split("/")[1]
+        environment_path = self.virtual_environments / program_name.split("/")[1]
+        environment_path.mkdir()
+        
+        # Clone the Repo
+        repo = self.github.get_repo(program_name)
+        command = [
+            "git", "clone", repo.svn_url, program_root_path
+        ]
+        run(command, stdout=DEVNULL, stderr=DEVNULL, check=True)
 
+        # File entry point & requirements
+        main_file = program_root_path / "main.py"
+        requirements_file = program_root_path / "requirements.txt"
 
-    def _write_to_file(self, repo, file, file_path) -> None:
-        content = repo.get_contents(file.filename)
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(file_path, "wb") as f:
-            f.write(b64decode(content.content))
+        if not main_file.exists():
+            print("Unable to locate entry point! Exiting!!")
+            return
+        elif not requirements_file.exists():
+            print("Unable to find requirements! Exiting!!")
+            return
+        
+        # Create Environment for Program
+        venv = VirtualEnvironment(environment_path)
+        venv.create()
+        venv.pip(["install", "-r", str(requirements_file)])
+        
+        # Add program to database
+        self.cursor.execute("INSERT INTO programs VALUES (?, ?, ?, ?, ?)", (program_name, repo.get_commits()[0].sha, repo.svn_url, str(program_root_path.resolve().absolute()), str(environment_path.resolve().absolute())))
+        self.connection.commit()
+    
+    def uninstall_program(self, program_name: str) -> None:
+        self.cursor.execute("SELECT root, environment FROM programs WHERE name=?", (program_name,))
+        program = self.cursor.fetchone()
 
-    def _remove_path(self, file_path) -> None:
-        if file_path.is_dir():
-            file_path.rmdir()
-        if file_path.exists():
-            file_path.unlink()
+        if not program:
+            print(f"{program_name} not found!")
+            return
 
-    def _move_path(self, installation_directory, file, file_path) -> None:
-        old_path = installation_directory / file.previous_filename
-        if old_path.exists():
-            old_path.rename(file_path)
+        installed_path = program[0]
+        environment_path = program[1]
+        
+        rmtree(installed_path)
+        rmtree(environment_path)
+        self.cursor.execute("DELETE FROM programs WHERE name=?", (program_name,))
+        self.connection.commit()
 
-    def _update_local_files(self, package: Package, repo: Repository, comparison: Comparison) -> int:
-        installation_directory = package.path
-        failed = 0
+    def list_programs(self) -> None:
+        self.cursor.execute("SELECT * FROM programs")
+        programs = self.cursor.fetchall()
 
-        for file in comparison.files:
-            file_path = installation_directory / file.filename
-            if file.status in ("added", "changed", "modified"):
-                try:
-                    self._write_to_file(repo, file, file_path)
-                except GithubException as e:
-                    print(f"Failed to download {file.filename}: {e.data}")
-                    failed += 1
-                except OSError as e:
-                    print(f"Failed to write {file_path}: {e}")
-                    failed += 1
-            elif file.status == "removed":
-                try:
-                    self._remove_path(file_path)
-                except OSError as e:
-                    print(f"Failed to remove {file_path}: {e}")
-                    failed += 1
-            elif file.status == "renamed":
-                try:
-                    self._move_path(installation_directory, file, file_path)
-                except OSError as e:
-                    print(f"Failed to rename {file.previous_filename} to {file.filename}: {e}")
-                    failed += 1
-        return failed
+        print(f"{'Name':<20} {'Commit':<40} {'URL':<40} {'Path':<40} {'Environment':<40}")
+        print('-' * 190)
+
+        for program in programs:
+            name, commit, url, root, environment = program
+            print(f"{name:<20} {commit:<10} {url:<40} {str(root):<40} {str(environment):<40}")
+
+    def _verify_file_integrity(self, folders: list[Path]) -> None:
+        """
+        Verified that all the folders needed to operate exist.
+        """
+        for folder in folders:
+            if not folder.exists():
+                folder.mkdir(parents=True)
+            elif not folder.is_dir():
+                raise OSError(f"{folder} must be a directory, not a file or otherwise!")
+
+    def _database_setup(self) -> None:
+        self.connection.execute("CREATE TABLE IF NOT EXISTS programs (name, commit_hash, url, root, environment)")
