@@ -1,5 +1,6 @@
 from pathlib import Path
-from os.path import expanduser
+from platform import system
+from os.path import expanduser, abspath
 from shutil import rmtree
 from sqlite3 import connect
 from subprocess import run, DEVNULL
@@ -9,7 +10,7 @@ from src.lppm.virtual_environment import VirtualEnvironment
 
 class PackageManager:
     """
-    Handles the internal logic
+    Handles the internal logic.
     """
 
     def __init__(self, github: Github):
@@ -26,7 +27,29 @@ class PackageManager:
         self.cursor = self.connection.cursor()
         self._database_setup()
 
+    def open_program(self, name: str) -> None:
+        """
+        Open the file location of where a program has been installed.
+        """
+        self.cursor.execute(
+            "SELECT root FROM programs WHERE name=?", (name,)
+        )
+        program_root = self.cursor.fetchone()
+
+        if not program_root:
+            print(f"{name} not found!")
+            return
+        
+        program_root = program_root[0]
+        failed = self._open_file_manager(program_root)
+
+        if failed:
+            print(f"Program Directory: {program_root}")
+
     def run_program(self, name: str, *args) -> None:
+        """
+        Runs a installed program. Chroots into the directory where its installed.
+        """
         self.cursor.execute(
             "SELECT root, environment FROM programs WHERE name=?", (name,)
         )
@@ -38,6 +61,11 @@ class PackageManager:
 
         program_path = Path(program[0])
         env_path = Path(program[1])
+
+        if program_path.parent != self.installation_folder:
+            print(f"Untrusted Program Detected! {name}")
+            exit(1)
+
         main_file = program_path / "main.py"
 
         venv = VirtualEnvironment(env_path)
@@ -47,6 +75,9 @@ class PackageManager:
         venv.python(command, False, str(program_path))
 
     def update(self, program: str | None = None) -> None:
+        """
+        Update either a specific program or all programs at once.
+        """
         if program:
             self.cursor.execute(
                 "SELECT commit_hash, root, environment FROM programs WHERE name=?",
@@ -103,6 +134,9 @@ class PackageManager:
         self.connection.commit()
 
     def install_program(self, program_name: str) -> None:
+        """
+        Install a program/repo. Expects a `main.py` and `requirements.txt` file in the root directory.
+        """
         # Verify it isnt already installed
         self.cursor.execute("SELECT * FROM programs WHERE name=?", (program_name,))
         found = self.cursor.fetchone()
@@ -151,6 +185,9 @@ class PackageManager:
         self.connection.commit()
 
     def uninstall_program(self, program_name: str) -> None:
+        """
+        Uninstall a program via it's name.
+        """
         self.cursor.execute(
             "SELECT root, environment FROM programs WHERE name=?", (program_name,)
         )
@@ -169,6 +206,9 @@ class PackageManager:
         self.connection.commit()
 
     def list_programs(self) -> None:
+        """
+        List all installed programs.
+        """
         self.cursor.execute("SELECT * FROM programs")
         programs = self.cursor.fetchall()
 
@@ -190,6 +230,28 @@ class PackageManager:
                 raise OSError(f"{folder} must be a directory, not a file or otherwise!")
 
     def _database_setup(self) -> None:
+        """
+        Creates the programs database table if it doesnt exist.
+        """
         self.connection.execute(
             "CREATE TABLE IF NOT EXISTS programs (name, commit_hash, url, root, environment)"
         )
+
+    def _open_file_manager(self, path) -> bool:
+        """
+        Attempts to open the file manager. If it cannot it'll return True, for failed. If it can then False.
+        """
+        system_name = system()
+
+        if system_name == "Windows":
+            # Windows: use explorer
+            run(["explorer", abspath(path)])
+        elif system_name == "Darwin":
+            # macOS: use open
+            run(["open", path])
+        elif system_name == "Linux":
+            # Linux: use xdg-open (most universal)
+            run(["xdg-open", path])
+        else:
+            return True
+        return False

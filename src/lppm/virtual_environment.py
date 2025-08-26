@@ -5,15 +5,25 @@ from pathlib import Path
 
 
 class VirtualEnvironment:
+    """
+    A virtual environment helper class.
+    """
     def __init__(self, environment_path: Path):
         self.environment_path = environment_path
 
     def create(self) -> None:
+        """
+        Create the virtual environment.
+        This will fail if it has already been created.
+        """
         vcreate(self.environment_path, with_pip=True)
 
     def pip(
         self, command: list[str], check: bool = True, root: str | None = None
     ) -> CompletedProcess:
+        """
+        Run a pip command in the virtual environment.
+        """
         pip_bin = (
             self.environment_path / "bin" / "pip"
             if osname != "nt"
@@ -24,6 +34,9 @@ class VirtualEnvironment:
     def python(
         self, command: list[str], check: bool = True, root: str | None = None
     ) -> CompletedProcess:
+        """
+        Run a python command in  the virtual environment.
+        """
         python_bin = (
             self.environment_path / "bin" / "python"
             if osname != "nt"

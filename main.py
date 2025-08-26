@@ -7,6 +7,9 @@ from src.lppm.package_manager import PackageManager
 
 
 class LapisPersonPackageManager:
+    """
+    Lapis' Personal Package Manager is a small CLI tool that helps simplify the process of installing and using my scripts.
+    """
     def __init__(self):
         auth = Auth.Token(environ["TOKEN"])
         self.github = Github(auth=auth)
