@@ -31,13 +31,11 @@ def parse_args(package_manager: PackageManager) -> None:
             print("You must provide a package to install!")
             sexit(1)
         package_manager.install_program(args.package_name)
-        print(f"Installed {args.package_name}!")
     elif args.command == "uninstall":
         if args.package_name is None:
             print("[-] You must provide a package to uninstall!")
             sexit(1)
         package_manager.uninstall_program(args.package_name)
-        print(f"Uninstalled {args.package_name}!")
     elif args.command == "update":
         if args.package_name:
             package_manager.update(args.package_name)

@@ -1,4 +1,5 @@
 from pathlib import Path
+from time import perf_counter
 from platform import system
 from os.path import expanduser, abspath
 from shutil import rmtree
@@ -78,6 +79,7 @@ class PackageManager:
         """
         Update either a specific program or all programs at once.
         """
+        start_time = perf_counter()
         if program:
             self.cursor.execute(
                 "SELECT commit_hash, root, environment FROM programs WHERE name=?",
@@ -105,6 +107,7 @@ class PackageManager:
             run(command, cwd=program_root, check=True)
 
             venv.pip(["install", "-r", program_root + "/requirements.txt"])
+            print(f"Updated {program} in {perf_counter() - start_time:.2f} seconds.")
             return
 
         self.cursor.execute("SELECT name, commit_hash, root, environment FROM programs")
@@ -132,11 +135,13 @@ class PackageManager:
                 (latest_commit_hash, name),
             )
         self.connection.commit()
+        print(f"Updated {program} in {perf_counter() - start_time:.2f} seconds.")
 
     def install_program(self, program_name: str) -> None:
         """
         Install a program/repo. Expects a `main.py` and `requirements.txt` file in the root directory.
         """
+        start_time = perf_counter()
         # Verify it isnt already installed
         self.cursor.execute("SELECT * FROM programs WHERE name=?", (program_name,))
         found = self.cursor.fetchone()
@@ -183,27 +188,34 @@ class PackageManager:
             ),
         )
         self.connection.commit()
+        print(f"Installed {program_name} in {perf_counter() - start_time:.2f} seconds.")
 
     def uninstall_program(self, program_name: str) -> None:
         """
         Uninstall a program via it's name.
         """
+        start_time = perf_counter()
         self.cursor.execute(
             "SELECT root, environment FROM programs WHERE name=?", (program_name,)
         )
         program = self.cursor.fetchone()
 
         if not program:
-            print(f"{program_name} not found!")
-            return
+            # Attempt to find it in the files
+            installed_path = self.installation_folder / program_name.split("/")[1]
+            environment_path = self.virtual_environments / program_name.split("/")[1]
+            if not installed_path.exists():
+                print(f"{program_name} not found!")
+                return
+        else:
+            installed_path = program[0]
+            environment_path = program[1]
 
-        installed_path = program[0]
-        environment_path = program[1]
-
-        rmtree(installed_path)
-        rmtree(environment_path)
+        rmtree(installed_path, ignore_errors=True)
+        rmtree(environment_path, ignore_errors=True)
         self.cursor.execute("DELETE FROM programs WHERE name=?", (program_name,))
         self.connection.commit()
+        print(f"Uninstalled {program_name} in {perf_counter() - start_time:.2f} seconds.")
 
     def list_programs(self) -> None:
         """
