@@ -128,12 +128,12 @@ class PackageManager:
         self.cursor.execute("SELECT * FROM programs")
         programs = self.cursor.fetchall()
 
-        print(f"{'Name':<20} {'Commit':<40} {'URL':<40} {'Path':<40} {'Environment':<40}")
-        print('-' * 190)
+        print(f"{'Name':<40} {'Commit':<40} {'URL':<40}")
+        print('-' * 120)
 
         for program in programs:
-            name, commit, url, root, environment = program
-            print(f"{name:<20} {commit:<10} {url:<40} {str(root):<40} {str(environment):<40}")
+            name, commit, url, _, _ = program
+            print(f"{name:<40} {commit:<40} {url:<40}")
 
     def _verify_file_integrity(self, folders: list[Path]) -> None:
         """

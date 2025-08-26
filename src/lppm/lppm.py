@@ -45,11 +45,13 @@ def main() -> None:
             print("You must provide a package to install!")
             sexit(1)
         package_manager.package_manager.install_program(args.package_name)
+        print(f"Installed {args.package_name}!")
     elif args.command == "uninstall":
         if args.package_name is None:
             print("[-] You must provide a package to uninstall!")
             sexit(1)
         package_manager.package_manager.uninstall_program(args.package_name)
+        print(f"Uninstalled {args.package_name}!")
     elif args.command == "list":
         package_manager.package_manager.list_programs()
     elif args.command == "run":
