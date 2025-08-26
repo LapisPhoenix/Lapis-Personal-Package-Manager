@@ -112,8 +112,9 @@ class PackageManager:
 
         self.cursor.execute("SELECT name, commit_hash, root, environment FROM programs")
         info = self.cursor.fetchall()
-
+        programs = 0
         for installed_program in info:
+            programs += 1
             name, commit, root, env = installed_program
             repo = self.github.get_repo(name)
             latest_commit_hash = repo.get_commits()[0].sha
@@ -135,7 +136,7 @@ class PackageManager:
                 (latest_commit_hash, name),
             )
         self.connection.commit()
-        print(f"Updated {program} in {perf_counter() - start_time:.2f} seconds.")
+        print(f"Updated {programs} programs in {perf_counter() - start_time:.2f} seconds.")
 
     def install_program(self, program_name: str) -> None:
         """
