@@ -66,6 +66,31 @@ class PackageManager:
             run(command, cwd=program_root, check=True)
 
             venv.pip(["install", "-r", program_root + "/requirements.txt"])
+            return
+        
+        self.cursor.execute("SELECT name, commit_hash, root, environment FROM programs")
+        info = self.cursor.fetchall()
+
+        for installed_program in info:
+            name, commit, root, env = installed_program
+            repo = self.github.get_repo(name)
+            latest_commit_hash = repo.get_commits()[0].sha
+            local_commit_hash = commit
+
+            if latest_commit_hash == local_commit_hash:
+                print(f"Ignoring {name}...")
+                continue
+            
+            venv = VirtualEnvironment(Path(env))
+
+            command = [
+                "git", "pull", "origin", "main"
+            ]
+
+            run(command, cwd=root, check=True)
+
+            venv.pip(["install", "-r", program_root + "/requirements.txt"])
+
 
     def install_program(self, program_name: str) -> None:
         # Verify it isnt already installed

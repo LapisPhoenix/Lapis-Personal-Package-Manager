@@ -24,7 +24,7 @@ def main() -> None:
     )
     argument_parser.add_argument(
         "command",
-        choices=["install", "uninstall", "list", "run"],
+        choices=["install", "uninstall", "list", "run", "update"],
         help="The command to execute: 'install', 'uninstall', or 'list'"
     )
     argument_parser.add_argument(
@@ -52,6 +52,11 @@ def main() -> None:
             sexit(1)
         package_manager.package_manager.uninstall_program(args.package_name)
         print(f"Uninstalled {args.package_name}!")
+    elif args.command == "update":
+        if args.package_name:
+            package_manager.package_manager.update(args.package_name)
+        else:
+            package_manager.package_manager.update()
     elif args.command == "list":
         package_manager.package_manager.list_programs()
     elif args.command == "run":
