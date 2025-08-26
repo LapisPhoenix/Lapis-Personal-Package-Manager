@@ -90,6 +90,7 @@ class PackageManager:
             run(command, cwd=root, check=True)
 
             venv.pip(["install", "-r", root + "/requirements.txt"])
+            self.cursor.execute("UPDATE programs SET commit_hash=? WHERE name=?", (latest_commit_hash, name))
 
 
     def install_program(self, program_name: str) -> None:
