@@ -29,7 +29,7 @@ class VirtualEnvironment:
             if osname != "nt"
             else self.environment_path / "Scripts" / "pip.exe"
         )
-        return run([str(pip_bin.resolve().absolute()), *command], check=check, cwd=root)
+        return run([str(pip_bin.resolve()), *command], check=check, cwd=root)
 
     def python(
         self, command: list[str], check: bool = True, root: str | None = None
@@ -43,5 +43,6 @@ class VirtualEnvironment:
             else self.environment_path / "Scripts" / "python.exe"
         )
         return run(
-            [str(python_bin.resolve().absolute()), *command], check=check, cwd=root
+            [str(python_bin.resolve()), *command], check=check, cwd=root
         )
+    

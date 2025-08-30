@@ -5,7 +5,7 @@ from platform import system
 from os.path import expanduser, abspath
 from shutil import rmtree
 from sqlite3 import connect
-from subprocess import run, DEVNULL
+from subprocess import run, DEVNULL, CalledProcessError
 from github import Github
 from src.lppm.virtual_environment import VirtualEnvironment
 
@@ -30,6 +30,9 @@ class PackageManager:
         self.cursor = self.connection.cursor()
         self._database_setup()
 
+    def __del__(self):
+        self.connection.close()
+
     def open_program(self, name: str) -> None:
         """
         Open the file location of where a program has been installed.
@@ -49,7 +52,7 @@ class PackageManager:
         if failed:
             self.logger.info(f"Program Directory: {program_root}")
 
-    def run_program(self, name: str, *args) -> None:
+    def run_program(self, name: str, args) -> None:
         """
         Runs a installed program. Chroots into the directory where its installed.
         """
@@ -62,10 +65,10 @@ class PackageManager:
             self.logger.critical(f"{name} not found!")
             return
 
-        program_path = Path(program[0])
-        env_path = Path(program[1])
+        program_path = Path(program[0]).resolve()
+        env_path = Path(program[1]).resolve()
 
-        if program_path.parent != self.installation_folder:
+        if not str(program_path).startswith(str(self.installation_folder.resolve())):
             self.logger.critical(f"Untrusted Program Detected! {name}")
             exit(1)
 
@@ -73,51 +76,57 @@ class PackageManager:
 
         venv = VirtualEnvironment(env_path)
         command = [str(main_file)]
-        command.extend(map(str, args))
+        if args is not None:
+            command.extend(map(str, args))
 
         venv.python(command, False, str(program_path))
 
-    def update(self, program: str | None = None) -> None:
+    def update(self, program_name: str | None = None) -> None:
         """
         Update either a specific program or all programs at once.
         """
         start_time = perf_counter()
-        if program:
+        if program_name:
             self.cursor.execute(
                 "SELECT commit_hash, root, environment FROM programs WHERE name=?",
-                (program,),
+                (program_name,),
             )
             program_info = self.cursor.fetchone()
 
             if not program_info:
-                self.logger.critical(f"{program} not found!")
+                self.logger.critical(f"{program_name} not found!")
                 return
-            repo = self.github.get_repo(program)
+            repo = self.github.get_repo(program_name)
             latest_commit_hash = repo.get_commits()[0].sha
             local_commit_hash = program_info[0]
 
             if latest_commit_hash == local_commit_hash:
-                self.logger.info(f"{program} already up to date!")
+                self.logger.info(f"{program_name} is already up to date!")
                 return
 
-            program_root = program_info[1]
-            environment = program_info[2]
+            program_root = Path(program_info[1]).resolve()
+            environment = Path(program_info[2]).resolve()
             venv = VirtualEnvironment(environment)
 
             command = ["git", "pull", "origin", "main"]
 
-            run(command, cwd=program_root, check=True)
+            try:
+                run(command, stdout=DEVNULL, stderr=DEVNULL, check=True)
+            except CalledProcessError as e:
+                self.logger.critical(f"Failed to clone repository {program_name}: {e}")
+                return
 
-            venv.pip(["install", "-r", program_root + "/requirements.txt"])
-            self.logger.info(f"Updated {program} in {perf_counter() - start_time:.2f} seconds.")
+            venv.pip(["install", "-r", str(program_root / "requirements.txt")])
+            self.logger.info(f"Updated {program_name} in {perf_counter() - start_time:.2f} seconds.")
             return
 
         self.cursor.execute("SELECT name, commit_hash, root, environment FROM programs")
         info = self.cursor.fetchall()
+
         programs = 0
         for installed_program in info:
-            programs += 1
             name, commit, root, env = installed_program
+            root = Path(root).resolve()
             repo = self.github.get_repo(name)
             latest_commit_hash = repo.get_commits()[0].sha
             local_commit_hash = commit
@@ -130,15 +139,20 @@ class PackageManager:
 
             command = ["git", "pull", "origin", "main"]
 
-            run(command, cwd=root, check=True)
+            try:
+                run(command, stdout=DEVNULL, stderr=DEVNULL, check=True)
+            except CalledProcessError as e:
+                self.logger.critical(f"Failed to clone repository {program_name}: {e}")
+                return
 
-            venv.pip(["install", "-r", root + "/requirements.txt"])
+            venv.pip(["install", "-r", str(root / "requirements.txt")])
             self.cursor.execute(
                 "UPDATE programs SET commit_hash=? WHERE name=?",
                 (latest_commit_hash, name),
             )
+            programs += 1
         self.connection.commit()
-        self.logger.info(f"Updated {programs} programs in {perf_counter() - start_time:.2f} seconds.")
+        self.logger.info(f"Updated {programs} program{'s' if programs != 1 else None} in {perf_counter() - start_time:.2f} seconds.")
 
     def install_program(self, program_name: str) -> None:
         """
@@ -162,7 +176,11 @@ class PackageManager:
         # Clone the Repo
         repo = self.github.get_repo(program_name)
         command = ["git", "clone", repo.svn_url, program_root_path]
-        run(command, stdout=DEVNULL, stderr=DEVNULL, check=True)
+        try:
+            run(command, stdout=DEVNULL, stderr=DEVNULL, check=True)
+        except CalledProcessError as e:
+            self.logger.critical(f"Failed to clone repository {program_name}: {e}")
+            return
 
         # File entry point & requirements
         main_file = program_root_path / "main.py"
