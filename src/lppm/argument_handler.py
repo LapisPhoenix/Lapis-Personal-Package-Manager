@@ -1,9 +1,19 @@
 from sys import exit as sexit
+from logging import Logger
 from argparse import ArgumentParser, REMAINDER
 from src.lppm.package_manager import PackageManager
 
 
-def parse_args(package_manager: PackageManager) -> None:
+def program_name_check(program_name, logger) -> None:
+    if program_name is None:
+        logger.critical("You must provide a package name!")
+        sexit(1)
+    elif '/' not in program_name:
+        logger.critical("Wrong Format! Example: LapisPhoenix/Lapis-Personal-Package-Manager")
+        sexit(1)
+
+
+def parse_args(package_manager: PackageManager, logger: Logger) -> None:
     """
     Parses the arguments given and runs the package manager.
     """
@@ -25,31 +35,30 @@ def parse_args(package_manager: PackageManager) -> None:
     )
 
     args = argument_parser.parse_args()
+    command = args.command
+    package_name = args.package_name
+    program_arguments = args.program_arguments
 
-    if args.command == "install":
-        if args.package_name is None:
-            print("You must provide a package to install!")
-            sexit(1)
-        package_manager.install_program(args.package_name)
-    elif args.command == "uninstall":
-        if args.package_name is None:
-            print("[-] You must provide a package to uninstall!")
-            sexit(1)
-        package_manager.uninstall_program(args.package_name)
-    elif args.command == "update":
-        if args.package_name:
-            package_manager.update(args.package_name)
-        else:
-            package_manager.update()
-    elif args.command == "list":
+    if command == "install":
+        program_name_check(package_name, logger)
+        package_manager.install_program(package_name)
+    elif command == "uninstall":
+        program_name_check(package_name, logger)
+        package_manager.uninstall_program(package_name)
+    elif command == "update":
+        if package_name:
+            program_name_check(package_name, logger)
+            package_manager.update(package_name)
+            sexit(0)
+        package_manager.update()
+    elif command == "list":
         package_manager.list_programs()
-    elif args.command == "run":
+    elif command == "run":
+        program_name_check(package_name, logger)
         package_manager.run_program(
-            args.package_name, args.program_arguments
+            package_name, program_arguments
         )
-    elif args.command == "open":
-        if args.package_name is None:
-            print("[-] You must provide a package to open!")
-            sexit(1)
-        package_manager.open_program(args.package_name)
+    elif command == "open":
+        program_name_check(package_name, logger)
+        package_manager.open_program(package_name)
     sexit(0)

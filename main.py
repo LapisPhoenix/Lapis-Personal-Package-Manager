@@ -1,4 +1,5 @@
 from os import environ
+from logging import getLogger, basicConfig
 from dotenv import load_dotenv
 from github import Auth
 from github import Github
@@ -13,10 +14,14 @@ class LapisPersonPackageManager:
     def __init__(self):
         auth = Auth.Token(environ["TOKEN"])
         self.github = Github(auth=auth)
-        self.package_manager = PackageManager(self.github)
+        basicConfig(
+            format="[%(name)s] %(levelname)s: %(message)s"
+        )
+        self.logger = getLogger("LPPM")
+        self.package_manager = PackageManager(self.github, self.logger)
 
     def execute(self):
-        parse_args(self.package_manager)
+        parse_args(self.package_manager, self.logger)
 
 
 def main():

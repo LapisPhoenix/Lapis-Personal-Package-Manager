@@ -1,5 +1,6 @@
 from pathlib import Path
 from time import perf_counter
+from logging import Logger
 from platform import system
 from os.path import expanduser, abspath
 from shutil import rmtree
@@ -14,7 +15,8 @@ class PackageManager:
     Handles the internal logic.
     """
 
-    def __init__(self, github: Github):
+    def __init__(self, github: Github, logger: Logger):
+        self.logger = logger
         self.github = github
         user_path = Path(expanduser("~"))
         self.installation_folder = user_path / ".lapis_packages"
@@ -38,14 +40,14 @@ class PackageManager:
         program_root = self.cursor.fetchone()
 
         if not program_root:
-            print(f"{name} not found!")
+            self.logger.critical(f"{name} not found!")
             return
         
         program_root = program_root[0]
         failed = self._open_file_manager(program_root)
 
         if failed:
-            print(f"Program Directory: {program_root}")
+            self.logger.info(f"Program Directory: {program_root}")
 
     def run_program(self, name: str, *args) -> None:
         """
@@ -57,14 +59,14 @@ class PackageManager:
         program = self.cursor.fetchone()
 
         if not program:
-            print(f"{name} not found!")
+            self.logger.critical(f"{name} not found!")
             return
 
         program_path = Path(program[0])
         env_path = Path(program[1])
 
         if program_path.parent != self.installation_folder:
-            print(f"Untrusted Program Detected! {name}")
+            self.logger.critical(f"Untrusted Program Detected! {name}")
             exit(1)
 
         main_file = program_path / "main.py"
@@ -88,14 +90,14 @@ class PackageManager:
             program_info = self.cursor.fetchone()
 
             if not program_info:
-                print(f"{program} not found!")
+                self.logger.critical(f"{program} not found!")
                 return
             repo = self.github.get_repo(program)
             latest_commit_hash = repo.get_commits()[0].sha
             local_commit_hash = program_info[0]
 
             if latest_commit_hash == local_commit_hash:
-                print(f"{program} already up to date!")
+                self.logger.info(f"{program} already up to date!")
                 return
 
             program_root = program_info[1]
@@ -107,7 +109,7 @@ class PackageManager:
             run(command, cwd=program_root, check=True)
 
             venv.pip(["install", "-r", program_root + "/requirements.txt"])
-            print(f"Updated {program} in {perf_counter() - start_time:.2f} seconds.")
+            self.logger.info(f"Updated {program} in {perf_counter() - start_time:.2f} seconds.")
             return
 
         self.cursor.execute("SELECT name, commit_hash, root, environment FROM programs")
@@ -121,7 +123,7 @@ class PackageManager:
             local_commit_hash = commit
 
             if latest_commit_hash == local_commit_hash:
-                print(f"Ignoring {name}...")
+                self.logger.info(f"Ignoring {name}...")
                 continue
 
             venv = VirtualEnvironment(Path(env))
@@ -136,7 +138,7 @@ class PackageManager:
                 (latest_commit_hash, name),
             )
         self.connection.commit()
-        print(f"Updated {programs} programs in {perf_counter() - start_time:.2f} seconds.")
+        self.logger.info(f"Updated {programs} programs in {perf_counter() - start_time:.2f} seconds.")
 
     def install_program(self, program_name: str) -> None:
         """
@@ -148,13 +150,14 @@ class PackageManager:
         found = self.cursor.fetchone()
 
         if found:
-            print(f"[Install]  Already found {program_name} installed!")
+            self.logger.info(f"Already found {program_name} installed!")
             return
 
         # Create needed paths
         program_root_path = self.installation_folder / program_name.split("/")[1]
         environment_path = self.virtual_environments / program_name.split("/")[1]
-        environment_path.mkdir()
+        program_root_path.mkdir(exist_ok=True)
+        environment_path.mkdir(exist_ok=True)
 
         # Clone the Repo
         repo = self.github.get_repo(program_name)
@@ -166,10 +169,10 @@ class PackageManager:
         requirements_file = program_root_path / "requirements.txt"
 
         if not main_file.exists():
-            print("Unable to locate entry point! Exiting!!")
+            self.logger.critical("Unable to locate entry point! Exiting!!")
             return
         elif not requirements_file.exists():
-            print("Unable to find requirements! Exiting!!")
+            self.logger.critical("Unable to find requirements! Exiting!!")
             return
 
         # Create Environment for Program
@@ -189,7 +192,7 @@ class PackageManager:
             ),
         )
         self.connection.commit()
-        print(f"Installed {program_name} in {perf_counter() - start_time:.2f} seconds.")
+        self.logger.info(f"Installed {program_name} in {perf_counter() - start_time:.2f} seconds.")
 
     def uninstall_program(self, program_name: str) -> None:
         """
@@ -205,9 +208,6 @@ class PackageManager:
             # Attempt to find it in the files
             installed_path = self.installation_folder / program_name.split("/")[1]
             environment_path = self.virtual_environments / program_name.split("/")[1]
-            if not installed_path.exists():
-                print(f"{program_name} not found!")
-                return
         else:
             installed_path = program[0]
             environment_path = program[1]
@@ -216,7 +216,7 @@ class PackageManager:
         rmtree(environment_path, ignore_errors=True)
         self.cursor.execute("DELETE FROM programs WHERE name=?", (program_name,))
         self.connection.commit()
-        print(f"Uninstalled {program_name} in {perf_counter() - start_time:.2f} seconds.")
+        self.logger.info(f"Uninstalled {program_name} in {perf_counter() - start_time:.2f} seconds.")
 
     def list_programs(self) -> None:
         """
